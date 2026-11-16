@@ -415,8 +415,11 @@ fn history_row(app: &mut App, ui: &mut egui::Ui, row: &[Message], actions: &mut 
     }
     let avatar_rect =
         Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
+    let veiled = !link && super::veil::covered(app.settings.privacy_blur, &response);
     if link {
         crate::ui::call::paint_link_avatar(ui, &palette, avatar_rect);
+    } else if veiled {
+        super::veil::disc(ui, &palette, avatar_rect);
     } else {
         widgets::paint_avatar(
             ui,
@@ -452,7 +455,17 @@ fn history_row(app: &mut App, ui: &mut egui::Ui, row: &[Message], actions: &mut 
         (right - stamp_galley.size().x - 8.0 - left).max(0.0),
         1,
     );
-    name_line.paint(ui, pos2(left, name_top), name_color);
+    if veiled {
+        super::veil::bar(
+            ui,
+            &palette,
+            pos2(left, name_top + 2.0),
+            name_line.size().x.min(130.0),
+            12.0,
+        );
+    } else {
+        name_line.paint(ui, pos2(left, name_top), name_color);
+    }
     let glyph_rect = Rect::from_min_size(pos2(left, rect.top() + 39.0), Vec2::splat(15.0));
     theme::paint_icon(
         ui,
@@ -618,14 +631,33 @@ fn person(app: &mut App, ui: &mut egui::Ui, id: &str, actions: &mut Vec<Action>)
         }
         let avatar_rect =
             Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
-        widgets::paint_avatar(ui, &palette, avatar_rect, &name, id, picture.as_deref());
         let left = rect.left() + 76.0;
         let width = (buttons.left() - 8.0 - left).max(0.0);
-        let name_line = widgets::line(ui, &name, theme::medium(14.5), palette.text, width, 1);
-        name_line.paint(ui, pos2(left, rect.top() + 14.0), palette.text);
-        if let Some(phone) = crate::model::phone_of(id).map(crate::util::phone) {
-            let phone_line = widgets::line(ui, &phone, theme::regular(13.0), palette.dim, width, 1);
-            phone_line.paint(ui, pos2(left, rect.top() + 38.0), palette.dim);
+        if super::veil::covered(app.settings.privacy_blur, &response) {
+            super::veil::disc(ui, &palette, avatar_rect);
+            super::veil::bar(
+                ui,
+                &palette,
+                pos2(left, rect.top() + 16.0),
+                width.min(130.0),
+                12.0,
+            );
+            super::veil::bar(
+                ui,
+                &palette,
+                pos2(left, rect.top() + 40.0),
+                width.min(100.0),
+                11.0,
+            );
+        } else {
+            widgets::paint_avatar(ui, &palette, avatar_rect, &name, id, picture.as_deref());
+            let name_line = widgets::line(ui, &name, theme::medium(14.5), palette.text, width, 1);
+            name_line.paint(ui, pos2(left, rect.top() + 14.0), palette.text);
+            if let Some(phone) = crate::model::phone_of(id).map(crate::util::phone) {
+                let phone_line =
+                    widgets::line(ui, &phone, theme::regular(13.0), palette.dim, width, 1);
+                phone_line.paint(ui, pos2(left, rect.top() + 38.0), palette.dim);
+            }
         }
     }
     let mut child = ui.new_child(
