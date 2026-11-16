@@ -841,6 +841,19 @@ fn starred_row(
         ),
         palette.secondary,
     );
+    // Covered over the finished row, so neither the chat's name nor the
+    // message shows until the pointer or focus is on the row.
+    if super::veil::covered(app.settings.privacy_blur, &response) {
+        super::veil::cover(ui, palette, bubble, 10.0);
+        let name_rect = Rect::from_min_size(
+            pos2(
+                rect.left() + 16.0,
+                rect.top() + 14.0 - name_line.size().y / 2.0,
+            ),
+            name_line.size(),
+        );
+        super::veil::cover(ui, palette, name_rect.expand2(vec2(2.0, 1.0)), 4.0);
+    }
     // The bubble's rect is what the menu is anchored to, and what a test reads
     // to click it.
     ui.ctx()
@@ -1308,21 +1321,26 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Message) {
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    let veiled = super::veil::covered(app.settings.privacy_blur, &response);
     if ui.is_rect_visible(rect) {
         if response.hovered() {
             widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
         }
         let avatar_rect =
             Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
-        let picture = app.avatar(&hit.chat);
-        widgets::paint_avatar(
-            ui,
-            &palette,
-            avatar_rect,
-            &title,
-            &hit.chat,
-            picture.as_deref(),
-        );
+        if veiled {
+            super::veil::disc(ui, &palette, avatar_rect);
+        } else {
+            let picture = app.avatar(&hit.chat);
+            widgets::paint_avatar(
+                ui,
+                &palette,
+                avatar_rect,
+                &title,
+                &hit.chat,
+                picture.as_deref(),
+            );
+        }
         let left = rect.left() + 76.0;
         let right = rect.right() - 14.0;
         let stamp_galley = ui.painter().layout_no_wrap(
@@ -1337,45 +1355,62 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Message) {
             palette.dim,
         );
         let name_width = (right - stamp_galley.size().x - 8.0 - left).max(0.0);
-        let name = widgets::line(ui, &title, theme::medium(14.5), palette.text, name_width, 1);
-        name.paint(ui, pos2(left, name_top), palette.text);
-        // Show the sender for group messages.
         let line_y = rect.top() + 38.0;
-        let mut x = left;
-        if hit.from_me {
-            let who = widgets::line(
+        if veiled {
+            super::veil::bar(
                 ui,
-                "You: ",
+                &palette,
+                pos2(left, name_top + 2.0),
+                name_width.min(130.0),
+                12.0,
+            );
+            super::veil::bar(
+                ui,
+                &palette,
+                pos2(left, line_y + 2.0),
+                (right - left).clamp(0.0, 190.0),
+                11.0,
+            );
+        } else {
+            let name = widgets::line(ui, &title, theme::medium(14.5), palette.text, name_width, 1);
+            name.paint(ui, pos2(left, name_top), palette.text);
+            // Show the sender for group messages.
+            let mut x = left;
+            if hit.from_me {
+                let who = widgets::line(
+                    ui,
+                    "You: ",
+                    theme::regular(13.0),
+                    palette.dim,
+                    (right - x) * 0.5,
+                    1,
+                );
+                who.paint(ui, pos2(x, line_y), palette.dim);
+                x += who.size().x;
+            } else if crate::model::ChatKind::from_id(&hit.chat) == crate::model::ChatKind::Group {
+                let sender = app.display_name_or(&hit.sender, hit.sender_name.as_deref());
+                let first = app.short_name(&hit.sender, &sender);
+                let who = widgets::line(
+                    ui,
+                    &format!("{first}: "),
+                    theme::regular(13.0),
+                    palette.dim,
+                    (right - x) * 0.5,
+                    1,
+                );
+                who.paint(ui, pos2(x, line_y), palette.dim);
+                x += who.size().x;
+            }
+            let words = widgets::line(
+                ui,
+                &app.preview_line(&hit.summary_in(app.locale), hit),
                 theme::regular(13.0),
                 palette.dim,
-                (right - x) * 0.5,
+                (right - x).max(0.0),
                 1,
             );
-            who.paint(ui, pos2(x, line_y), palette.dim);
-            x += who.size().x;
-        } else if crate::model::ChatKind::from_id(&hit.chat) == crate::model::ChatKind::Group {
-            let sender = app.display_name_or(&hit.sender, hit.sender_name.as_deref());
-            let first = app.short_name(&hit.sender, &sender);
-            let who = widgets::line(
-                ui,
-                &format!("{first}: "),
-                theme::regular(13.0),
-                palette.dim,
-                (right - x) * 0.5,
-                1,
-            );
-            who.paint(ui, pos2(x, line_y), palette.dim);
-            x += who.size().x;
+            words.paint(ui, pos2(x, line_y), palette.dim);
         }
-        let words = widgets::line(
-            ui,
-            &app.preview_line(&hit.summary_in(app.locale), hit),
-            theme::regular(13.0),
-            palette.dim,
-            (right - x).max(0.0),
-            1,
-        );
-        words.paint(ui, pos2(x, line_y), palette.dim);
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.clicked() {
@@ -1468,6 +1503,7 @@ fn person_row(
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    let veiled = super::veil::covered(app.settings.privacy_blur, &response);
     // The highlighted row is scrolled into view once each time it changes, so
     // Enter never opens a chat the list has scrolled past. Scrolling again
     // every frame would fight the reader.
@@ -1499,28 +1535,48 @@ fn person_row(
         }
         let avatar_rect =
             Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
-        let picture = app.avatar(id);
-        widgets::paint_avatar(ui, &palette, avatar_rect, name, id, picture.as_deref());
         let left = rect.left() + 76.0;
-        let name_line = widgets::line(
-            ui,
-            name,
-            theme::medium(14.5),
-            palette.text,
-            rect.right() - 14.0 - left,
-            1,
-        );
-        name_line.paint(ui, pos2(left, rect.top() + 14.0), palette.text);
-        if let Some(detail) = detail {
-            let phone_line = widgets::line(
+        if veiled {
+            super::veil::disc(ui, &palette, avatar_rect);
+            super::veil::bar(
                 ui,
-                detail,
-                theme::regular(13.0),
-                palette.dim,
+                &palette,
+                pos2(left, rect.top() + 16.0),
+                (rect.right() - 14.0 - left).clamp(0.0, 130.0),
+                12.0,
+            );
+            if detail.is_some() {
+                super::veil::bar(
+                    ui,
+                    &palette,
+                    pos2(left, rect.top() + 40.0),
+                    (rect.right() - 14.0 - left).clamp(0.0, 100.0),
+                    11.0,
+                );
+            }
+        } else {
+            let picture = app.avatar(id);
+            widgets::paint_avatar(ui, &palette, avatar_rect, name, id, picture.as_deref());
+            let name_line = widgets::line(
+                ui,
+                name,
+                theme::medium(14.5),
+                palette.text,
                 rect.right() - 14.0 - left,
                 1,
             );
-            phone_line.paint(ui, pos2(left, rect.top() + 38.0), palette.dim);
+            name_line.paint(ui, pos2(left, rect.top() + 14.0), palette.text);
+            if let Some(detail) = detail {
+                let phone_line = widgets::line(
+                    ui,
+                    detail,
+                    theme::regular(13.0),
+                    palette.dim,
+                    rect.right() - 14.0 - left,
+                    1,
+                );
+                phone_line.paint(ui, pos2(left, rect.top() + 38.0), palette.dim);
+            }
         }
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
