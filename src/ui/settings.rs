@@ -588,6 +588,14 @@ fn sections(app: &App) -> Vec<Section> {
         "",
         |settings| &mut settings.send_typing,
     );
+    privacy.toggle(
+        translated(locale, "Blur chats until hovered"),
+        translated(
+            locale,
+            "Hides names, messages and pictures until the pointer or keyboard focus is on them.",
+        ),
+        |settings| &mut settings.privacy_blur,
+    );
     app_lock_rows(app, &mut privacy);
     privacy.row(
         translated(locale, "Blocked contacts"),

@@ -641,6 +641,12 @@ fn header(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> Rect {
                 if block.clicked() {
                     app.actions.push(Action::OpenInfo(chat.id.clone()));
                 }
+                // Over the finished picture, name and subtitle, so nothing
+                // of them shows until the pointer or focus is on the block.
+                if super::veil::covered(app.settings.privacy_blur, &block) && text.is_positive() {
+                    super::veil::disc(ui, &palette, avatar);
+                    super::veil::cover(ui, &palette, text.expand2(vec2(4.0, 2.0)), 6.0);
+                }
                 // The item and the width that has to hold it are measured from
                 // the same localized label: a translation wider than the
                 // English one would otherwise be clipped.
@@ -2640,6 +2646,9 @@ struct View<'a> {
     chat: &'a Chat,
     me: Option<&'a str>,
     auto_download: bool,
+    /// Cover bubbles and sender pictures until hovered or focused
+    /// (`Settings::privacy_blur`).
+    privacy_blur: bool,
     connected: bool,
     account_receipts_off: bool,
     poll_voting: &'a HashSet<(ChatId, String)>,
@@ -3091,6 +3100,7 @@ fn messages(app: &mut App, ui: &mut egui::Ui, chat: &Chat, under: f32) {
         chat,
         me: app.me.as_deref(),
         auto_download: app.account().settings.auto_download,
+        privacy_blur: app.settings.privacy_blur,
         connected: app.link.is_connected(),
         account_receipts_off: app.account_receipts_off,
         poll_voting: &app.poll_voting,
@@ -4956,6 +4966,9 @@ fn bubble(
                         _ => space,
                     };
                     let avatar = ui.interact(rect, id.with("avatar"), Sense::CLICK);
+                    let veiled = view.privacy_blur
+                        && !avatar.has_focus()
+                        && !super::veil::pointer_over(ui, rect);
                     theme::focus_outline(ui, avatar.id, rect, SENDER_AVATAR / 2.0);
                     if avatar
                         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -4963,7 +4976,9 @@ fn bubble(
                     {
                         actions.push(sender_info_action(message));
                     }
-                    if ui.is_rect_visible(rect) {
+                    if ui.is_rect_visible(rect) && veiled {
+                        super::veil::disc(ui, &view.palette, rect);
+                    } else if ui.is_rect_visible(rect) {
                         let name = (view.names_or)(&message.sender, message.sender_name.as_deref());
                         widgets::paint_avatar(
                             ui,
@@ -5736,6 +5751,24 @@ fn bubble_frame(
     ui.ctx()
         .data_mut(|data| data.insert_temp(rect_id, inner.response.rect));
     let bubble = early.unwrap_or_else(|| ui.interact(inner.response.rect, bubble_id, Sense::CLICK));
+    if view.privacy_blur
+        && ui.is_rect_visible(inner.response.rect)
+        && !super::veil::pointer_over(ui, inner.response.rect)
+        && !super::veil::focus_within(ui, inner.response.rect)
+        && !bubble.has_focus()
+    {
+        // Painted over the finished bubble, so none of its text, picture or
+        // footer shows. A bubble with a fill is covered inside its outline;
+        // a picture or sticker without one, over its own edges.
+        let (rect, radius) = if fill == Color32::TRANSPARENT {
+            (inner.response.rect, 8.0)
+        } else if palette.bubbles == theme::BubbleStyle::Messages {
+            (inner.response.rect.shrink(4.0), 14.0)
+        } else {
+            (inner.response.rect.shrink(4.0), 6.0)
+        };
+        super::veil::cover(ui, &palette, rect, radius);
+    }
     if view.selecting {
         return bubble;
     }
@@ -7097,6 +7130,7 @@ pub(crate) fn list_menu(
         chat,
         me: app.me.as_deref(),
         auto_download: app.settings.auto_download,
+        privacy_blur: app.settings.privacy_blur,
         connected: app.link.is_connected(),
         poll_voting: &app.poll_voting,
         interactive_pending: &app.interactive_sending,
@@ -12819,6 +12853,7 @@ mod tests {
             chat: &chat,
             me: None,
             auto_download: app.settings.auto_download,
+            privacy_blur: app.settings.privacy_blur,
             connected: false,
             poll_voting: &app.poll_voting,
             interactive_pending: &app.interactive_sending,
@@ -12847,6 +12882,72 @@ mod tests {
             pin_notices: &[],
         };
         check(&view);
+    }
+
+    #[test]
+    fn the_privacy_blur_covers_a_bubble_until_the_pointer_rests_on_it() {
+        fn covers(shape: &egui::Shape, color: Color32) -> usize {
+            match shape {
+                egui::Shape::Rect(rect) => usize::from(rect.fill == color),
+                egui::Shape::Vec(shapes) => shapes.iter().map(|shape| covers(shape, color)).sum(),
+                _ => 0,
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::theme::install(&ctx);
+        with_still_view(|view| {
+            let color = super::super::veil::cover_color(&view.palette);
+            let message = crate::archive::tests::message("1@s.whatsapp.net", "m1", 0, false);
+            let frame = |blur: bool, events: Vec<egui::Event>| {
+                let mut bubble = Rect::NOTHING;
+                let view = View {
+                    privacy_blur: blur,
+                    ..*view
+                };
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            vec2(400.0, 200.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        bubble = bubble_frame(
+                            ui,
+                            &view,
+                            &message,
+                            None,
+                            false,
+                            false,
+                            300.0,
+                            &mut Vec::new(),
+                        )
+                        .rect;
+                    },
+                );
+                output.textures_delta.clear();
+                let covered = output
+                    .shapes
+                    .iter()
+                    .map(|clipped| covers(&clipped.shape, color))
+                    .sum::<usize>();
+                (covered, bubble)
+            };
+            assert_eq!(frame(false, vec![]).0, 0, "the setting off covers nothing");
+            let (covered, bubble) = frame(true, vec![]);
+            assert_eq!(covered, 1, "a bubble nobody points at is covered");
+            // The pointer counts from the frame after it moves.
+            frame(true, vec![egui::Event::PointerMoved(bubble.center())]);
+            assert_eq!(frame(true, vec![]).0, 0, "a bubble under the pointer shows");
+            frame(true, vec![egui::Event::PointerGone]);
+            assert_eq!(
+                frame(true, vec![]).0,
+                1,
+                "and is covered again once it leaves"
+            );
+        });
     }
 
     #[test]
