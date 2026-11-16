@@ -357,6 +357,7 @@ fn identity(app: &mut App, ui: &mut egui::Ui, shown: &Shown, overlay: bool) {
     let mut renaming = app.group_name_edit.take().filter(|_| group_editable);
     let mut group_action = None;
     ui.vertical_centered(|ui| {
+        let area = ui.available_rect_before_wrap();
         if group_editable {
             group_action = group_photo(app, ui, name, id, photo, picture.as_deref());
         } else if let Some(picture) = picture.as_deref() {
@@ -514,6 +515,27 @@ fn identity(app: &mut App, ui: &mut egui::Ui, shown: &Shown, overlay: bool) {
                 theme::regular(13.5),
                 palette.secondary,
             );
+        }
+        // Over the finished picture, name and number, so none of them shows
+        // until the pointer or keyboard focus is on that block.
+        if app.settings.privacy_blur {
+            let block = Rect::from_x_y_ranges(area.x_range(), area.top()..=ui.cursor().top());
+            if ui.is_rect_visible(block)
+                && !super::veil::pointer_over(ui, block)
+                && !super::veil::focus_within(ui, block)
+            {
+                let picture = Rect::from_center_size(
+                    pos2(area.center().x, area.top() + photo / 2.0),
+                    Vec2::splat(photo),
+                );
+                super::veil::disc(ui, &palette, picture);
+                let half = area.width().min(280.0) / 2.0;
+                let words = Rect::from_x_y_ranges(
+                    area.center().x - half..=area.center().x + half,
+                    picture.bottom() + 4.0..=ui.cursor().top().max(picture.bottom() + 4.0),
+                );
+                super::veil::cover(ui, &palette, words, 6.0);
+            }
         }
         if saving {
             theme::text(
@@ -1014,19 +1036,24 @@ fn members(app: &mut App, ui: &mut egui::Ui, shown: &Shown, window: f32, photo: 
                     if response.hovered() {
                         ui.painter().rect_filled(rect, 6.0, palette.surface_hover);
                     }
-                    let picture = app.avatar(member);
+                    let veiled = super::veil::covered(app.settings.privacy_blur, &response);
                     let avatar = egui::Rect::from_center_size(
                         egui::pos2(rect.left() + 16.0, rect.center().y),
                         egui::Vec2::splat(24.0),
                     );
-                    widgets::paint_avatar(
-                        ui,
-                        &palette,
-                        avatar,
-                        name.trim_start_matches('~'),
-                        member,
-                        picture.as_deref(),
-                    );
+                    if veiled {
+                        super::veil::disc(ui, &palette, avatar);
+                    } else {
+                        let picture = app.avatar(member);
+                        widgets::paint_avatar(
+                            ui,
+                            &palette,
+                            avatar,
+                            name.trim_start_matches('~'),
+                            member,
+                            picture.as_deref(),
+                        );
+                    }
                     // The end of the row: the admin tag and the menu button.
                     let mut end = rect.right() - 4.0;
                     if let Some(more) = &more {
@@ -1066,19 +1093,29 @@ fn members(app: &mut App, ui: &mut egui::Ui, shown: &Shown, window: f32, photo: 
                         tag.paint(ui, pill.min + vec2(6.0, 2.0), palette.accent);
                         end = pill.left() - 6.0;
                     }
-                    let line = widgets::line(
-                        ui,
-                        name,
-                        theme::regular(13.0),
-                        palette.text,
-                        (end - rect.left() - 34.0).max(20.0),
-                        1,
-                    );
-                    line.paint(
-                        ui,
-                        egui::pos2(rect.left() + 34.0, rect.center().y - line.size().y / 2.0),
-                        palette.text,
-                    );
+                    if veiled {
+                        super::veil::bar(
+                            ui,
+                            &palette,
+                            egui::pos2(rect.left() + 34.0, rect.center().y - 5.0),
+                            (end - rect.left() - 34.0).clamp(0.0, 110.0),
+                            10.0,
+                        );
+                    } else {
+                        let line = widgets::line(
+                            ui,
+                            name,
+                            theme::regular(13.0),
+                            palette.text,
+                            (end - rect.left() - 34.0).max(20.0),
+                            1,
+                        );
+                        line.paint(
+                            ui,
+                            egui::pos2(rect.left() + 34.0, rect.center().y - line.size().y / 2.0),
+                            palette.text,
+                        );
+                    }
                 }
                 // The menu opens from its button or a right-click on the row.
                 if let Some(more) = &more {
@@ -1570,6 +1607,11 @@ fn media_cell(
             ui.painter()
                 .rect_filled(rect, 6.0, Color32::from_white_alpha(24));
         }
+        // Over the finished thumbnail, so the picture shows only under the
+        // pointer or with focus.
+        if super::veil::covered(app.settings.privacy_blur, &response) {
+            super::veil::cover(ui, &palette, rect, 6.0);
+        }
     }
     if response
         .on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -1744,6 +1786,14 @@ fn item_row(
         name.paint(ui, pos2(left, rect.top() + 12.0), palette.text);
         let line = widgets::line(ui, detail, theme::regular(12.0), palette.dim, width, 1);
         line.paint(ui, pos2(left, rect.top() + 33.0), palette.dim);
+        // File names and links are covered until the row is pointed at.
+        if super::veil::covered(app.settings.privacy_blur, &response) {
+            let text = Rect::from_min_max(
+                pos2(left - 2.0, rect.top() + 10.0),
+                pos2(left + width.min(240.0), rect.top() + 51.0),
+            );
+            super::veil::cover(ui, &palette, text, 4.0);
+        }
         ui.painter().hline(
             left..=rect.right() - MARGIN,
             rect.bottom() - 0.5,

@@ -841,6 +841,19 @@ fn starred_row(
         ),
         palette.secondary,
     );
+    // Covered over the finished row, so neither the chat's name nor the
+    // message shows until the pointer or focus is on the row.
+    if super::veil::covered(app.settings.privacy_blur, &response) {
+        super::veil::cover(ui, palette, bubble, 10.0);
+        let name_rect = Rect::from_min_size(
+            pos2(
+                rect.left() + 16.0,
+                rect.top() + 14.0 - name_line.size().y / 2.0,
+            ),
+            name_line.size(),
+        );
+        super::veil::cover(ui, palette, name_rect.expand2(vec2(2.0, 1.0)), 4.0);
+    }
     // The bubble's rect is what the menu is anchored to, and what a test reads
     // to click it.
     ui.ctx()
@@ -1308,21 +1321,26 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Message) {
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    let veiled = super::veil::covered(app.settings.privacy_blur, &response);
     if ui.is_rect_visible(rect) {
         if response.hovered() {
             widgets::row_highlight(ui, &palette, rect, palette.surface_hover);
         }
         let avatar_rect =
             Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
-        let picture = app.avatar(&hit.chat);
-        widgets::paint_avatar(
-            ui,
-            &palette,
-            avatar_rect,
-            &title,
-            &hit.chat,
-            picture.as_deref(),
-        );
+        if veiled {
+            super::veil::disc(ui, &palette, avatar_rect);
+        } else {
+            let picture = app.avatar(&hit.chat);
+            widgets::paint_avatar(
+                ui,
+                &palette,
+                avatar_rect,
+                &title,
+                &hit.chat,
+                picture.as_deref(),
+            );
+        }
         let left = rect.left() + 76.0;
         let right = rect.right() - 14.0;
         let stamp_galley = ui.painter().layout_no_wrap(
@@ -1337,45 +1355,62 @@ fn hit_row(app: &mut App, ui: &mut egui::Ui, hit: &Message) {
             palette.dim,
         );
         let name_width = (right - stamp_galley.size().x - 8.0 - left).max(0.0);
-        let name = widgets::line(ui, &title, theme::medium(14.5), palette.text, name_width, 1);
-        name.paint(ui, pos2(left, name_top), palette.text);
-        // Show the sender for group messages.
         let line_y = rect.top() + 38.0;
-        let mut x = left;
-        if hit.from_me {
-            let who = widgets::line(
+        if veiled {
+            super::veil::bar(
                 ui,
-                "You: ",
+                &palette,
+                pos2(left, name_top + 2.0),
+                name_width.min(130.0),
+                12.0,
+            );
+            super::veil::bar(
+                ui,
+                &palette,
+                pos2(left, line_y + 2.0),
+                (right - left).clamp(0.0, 190.0),
+                11.0,
+            );
+        } else {
+            let name = widgets::line(ui, &title, theme::medium(14.5), palette.text, name_width, 1);
+            name.paint(ui, pos2(left, name_top), palette.text);
+            // Show the sender for group messages.
+            let mut x = left;
+            if hit.from_me {
+                let who = widgets::line(
+                    ui,
+                    "You: ",
+                    theme::regular(13.0),
+                    palette.dim,
+                    (right - x) * 0.5,
+                    1,
+                );
+                who.paint(ui, pos2(x, line_y), palette.dim);
+                x += who.size().x;
+            } else if crate::model::ChatKind::from_id(&hit.chat) == crate::model::ChatKind::Group {
+                let sender = app.display_name_or(&hit.sender, hit.sender_name.as_deref());
+                let first = app.short_name(&hit.sender, &sender);
+                let who = widgets::line(
+                    ui,
+                    &format!("{first}: "),
+                    theme::regular(13.0),
+                    palette.dim,
+                    (right - x) * 0.5,
+                    1,
+                );
+                who.paint(ui, pos2(x, line_y), palette.dim);
+                x += who.size().x;
+            }
+            let words = widgets::line(
+                ui,
+                &app.preview_line(&hit.summary_in(app.locale), hit),
                 theme::regular(13.0),
                 palette.dim,
-                (right - x) * 0.5,
+                (right - x).max(0.0),
                 1,
             );
-            who.paint(ui, pos2(x, line_y), palette.dim);
-            x += who.size().x;
-        } else if crate::model::ChatKind::from_id(&hit.chat) == crate::model::ChatKind::Group {
-            let sender = app.display_name_or(&hit.sender, hit.sender_name.as_deref());
-            let first = app.short_name(&hit.sender, &sender);
-            let who = widgets::line(
-                ui,
-                &format!("{first}: "),
-                theme::regular(13.0),
-                palette.dim,
-                (right - x) * 0.5,
-                1,
-            );
-            who.paint(ui, pos2(x, line_y), palette.dim);
-            x += who.size().x;
+            words.paint(ui, pos2(x, line_y), palette.dim);
         }
-        let words = widgets::line(
-            ui,
-            &app.preview_line(&hit.summary_in(app.locale), hit),
-            theme::regular(13.0),
-            palette.dim,
-            (right - x).max(0.0),
-            1,
-        );
-        words.paint(ui, pos2(x, line_y), palette.dim);
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     if response.clicked() {
@@ -1468,6 +1503,7 @@ fn person_row(
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    let veiled = super::veil::covered(app.settings.privacy_blur, &response);
     // The highlighted row is scrolled into view once each time it changes, so
     // Enter never opens a chat the list has scrolled past. Scrolling again
     // every frame would fight the reader.
@@ -1499,28 +1535,48 @@ fn person_row(
         }
         let avatar_rect =
             Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
-        let picture = app.avatar(id);
-        widgets::paint_avatar(ui, &palette, avatar_rect, name, id, picture.as_deref());
         let left = rect.left() + 76.0;
-        let name_line = widgets::line(
-            ui,
-            name,
-            theme::medium(14.5),
-            palette.text,
-            rect.right() - 14.0 - left,
-            1,
-        );
-        name_line.paint(ui, pos2(left, rect.top() + 14.0), palette.text);
-        if let Some(detail) = detail {
-            let phone_line = widgets::line(
+        if veiled {
+            super::veil::disc(ui, &palette, avatar_rect);
+            super::veil::bar(
                 ui,
-                detail,
-                theme::regular(13.0),
-                palette.dim,
+                &palette,
+                pos2(left, rect.top() + 16.0),
+                (rect.right() - 14.0 - left).clamp(0.0, 130.0),
+                12.0,
+            );
+            if detail.is_some() {
+                super::veil::bar(
+                    ui,
+                    &palette,
+                    pos2(left, rect.top() + 40.0),
+                    (rect.right() - 14.0 - left).clamp(0.0, 100.0),
+                    11.0,
+                );
+            }
+        } else {
+            let picture = app.avatar(id);
+            widgets::paint_avatar(ui, &palette, avatar_rect, name, id, picture.as_deref());
+            let name_line = widgets::line(
+                ui,
+                name,
+                theme::medium(14.5),
+                palette.text,
                 rect.right() - 14.0 - left,
                 1,
             );
-            phone_line.paint(ui, pos2(left, rect.top() + 38.0), palette.dim);
+            name_line.paint(ui, pos2(left, rect.top() + 14.0), palette.text);
+            if let Some(detail) = detail {
+                let phone_line = widgets::line(
+                    ui,
+                    detail,
+                    theme::regular(13.0),
+                    palette.dim,
+                    rect.right() - 14.0 - left,
+                    1,
+                );
+                phone_line.paint(ui, pos2(left, rect.top() + 38.0), palette.dim);
+            }
         }
     }
     response.on_hover_cursor(egui::CursorIcon::PointingHand)
@@ -1544,6 +1600,9 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         Sense::click(),
     );
     theme::reveal_focus(&response);
+    // With the privacy blur on, the row shows bars in place of its name,
+    // preview and picture until the pointer or focus is on it.
+    let veiled = super::veil::covered(app.settings.privacy_blur, &response);
     // The preview area and the whole last message, when the row cuts it short.
     let mut full_preview: Option<(Rect, String, String)> = None;
     response.widget_info(|| {
@@ -1562,15 +1621,19 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         }
         let avatar_rect =
             Rect::from_center_size(pos2(rect.left() + 38.0, rect.center().y), Vec2::splat(48.0));
-        let picture = app.avatar(&chat.id);
-        widgets::paint_avatar(
-            ui,
-            &palette,
-            avatar_rect,
-            &title,
-            &chat.id,
-            picture.as_deref(),
-        );
+        if veiled {
+            super::veil::disc(ui, &palette, avatar_rect);
+        } else {
+            let picture = app.avatar(&chat.id);
+            widgets::paint_avatar(
+                ui,
+                &palette,
+                avatar_rect,
+                &title,
+                &chat.id,
+                picture.as_deref(),
+            );
+        }
         if chat.disappearing_timer().is_some() {
             widgets::paint_disappearing_badge(ui, &palette, avatar_rect);
         }
@@ -1603,8 +1666,18 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
         } else {
             theme::medium(14.5)
         };
-        let name = widgets::line(ui, &title, name_font, palette.text, name_width, 1);
-        name.paint(ui, pos2(left, name_top), palette.text);
+        if veiled {
+            super::veil::bar(
+                ui,
+                &palette,
+                pos2(left, name_top + 2.0),
+                name_width.min(130.0),
+                12.0,
+            );
+        } else {
+            let name = widgets::line(ui, &title, name_font, palette.text, name_width, 1);
+            name.paint(ui, pos2(left, name_top), palette.text);
+        }
 
         // Leave room for badges beside the latest-message preview.
         let mut badge_right = right;
@@ -1640,113 +1713,123 @@ fn row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response {
             Icon::Pin.image(palette.dim, 14.0).paint_at(ui, icon_rect);
             badge_right -= 20.0;
         }
-        let mut x = left;
-        let typing = app.typing_in(&chat.id);
-        let preview_color = if unread && !muted {
-            palette.secondary
-        } else {
-            palette.dim
-        };
-        let preview = if !typing.is_empty() {
-            let recording = typing[0].2 == ChatActivity::RecordingAudio;
-            let who = if chat.is_group() && recording {
-                crate::i18n::gettext(app.locale, "{name} is recording audio…")
-                    .replace("{name}", typing[0].1.trim_start_matches('~'))
-            } else if chat.is_group() {
-                format!("{} is typing…", typing[0].1.trim_start_matches('~'))
-            } else if recording {
-                crate::i18n::gettext(app.locale, "recording audio…").into_owned()
-            } else {
-                "typing…".to_owned()
-            };
-            widgets::line(
+        if veiled {
+            super::veil::bar(
                 ui,
-                &who,
-                theme::medium(13.0),
-                palette.accent,
-                badge_right - x,
-                1,
-            )
-        } else if let Some(draft) = app.draft_preview(&chat.id) {
-            // Unsent text waits here as in WhatsApp, marked in the accent.
-            let label = format!("{} ", crate::i18n::gettext(app.locale, "Draft:"));
-            let label = widgets::line(
-                ui,
-                &label,
-                theme::medium(13.0),
-                palette.accent,
-                (badge_right - x) * 0.5,
-                1,
+                &palette,
+                pos2(left, line_y + 2.0),
+                (badge_right - left).clamp(0.0, 190.0),
+                11.0,
             );
-            let width = label.size().x;
-            label.paint(ui, pos2(x, line_y), palette.accent);
-            x += width;
-            widgets::line(
-                ui,
-                &draft,
-                theme::regular(13.0),
-                preview_color,
-                (badge_right - x).max(0.0),
-                1,
-            )
-        } else if let Some(last) = &chat.last {
-            let mut prefix = String::new();
-            if last.from_me {
-                let tick_rect =
-                    Rect::from_center_size(pos2(x + 8.0, line_y + 8.0), Vec2::splat(16.0));
-                widgets::ticks(
+        } else {
+            let mut x = left;
+            let typing = app.typing_in(&chat.id);
+            let preview_color = if unread && !muted {
+                palette.secondary
+            } else {
+                palette.dim
+            };
+            let preview = if !typing.is_empty() {
+                let recording = typing[0].2 == ChatActivity::RecordingAudio;
+                let who = if chat.is_group() && recording {
+                    crate::i18n::gettext(app.locale, "{name} is recording audio…")
+                        .replace("{name}", typing[0].1.trim_start_matches('~'))
+                } else if chat.is_group() {
+                    format!("{} is typing…", typing[0].1.trim_start_matches('~'))
+                } else if recording {
+                    crate::i18n::gettext(app.locale, "recording audio…").into_owned()
+                } else {
+                    "typing…".to_owned()
+                };
+                widgets::line(
                     ui,
-                    &palette,
-                    tick_rect,
-                    super::conversation::display_delivery(
-                        last.status,
-                        last.from_me,
-                        chat.kind,
-                        app.account_receipts_off,
-                    ),
-                );
-                x += 20.0;
-            } else if chat.is_group() {
-                let sender = app.display_name_or(&last.sender, last.sender_name.as_deref());
-                let first = app.short_name(&last.sender, &sender);
-                prefix = format!("{first}: ");
-                let sender = widgets::line(
+                    &who,
+                    theme::medium(13.0),
+                    palette.accent,
+                    badge_right - x,
+                    1,
+                )
+            } else if let Some(draft) = app.draft_preview(&chat.id) {
+                // Unsent text waits here as in WhatsApp, marked in the accent.
+                let label = format!("{} ", crate::i18n::gettext(app.locale, "Draft:"));
+                let label = widgets::line(
                     ui,
-                    &prefix,
-                    theme::regular(13.0),
-                    preview_color,
+                    &label,
+                    theme::medium(13.0),
+                    palette.accent,
                     (badge_right - x) * 0.5,
                     1,
                 );
-                let width = sender.size().x;
-                sender.paint(ui, pos2(x, line_y), preview_color);
+                let width = label.size().x;
+                label.paint(ui, pos2(x, line_y), palette.accent);
                 x += width;
-            }
-            let words = widgets::line(
-                ui,
-                &crate::markup::plain(
-                    &app.resolve_mention_tokens(&last.summary_in(app.locale)),
-                    &[],
-                ),
-                theme::regular(13.0),
-                preview_color,
-                (badge_right - x).max(0.0),
-                1,
-            );
-            // The row shows one line: offer the whole message when that line
-            // was cut short or the message has more lines than it.
-            if words.galley.elided || last.full.trim_end() != last.summary {
-                let area = Rect::from_min_max(
-                    pos2(left, line_y - 4.0),
-                    pos2(badge_right, line_y + words.size().y.max(16.0) + 4.0),
+                widgets::line(
+                    ui,
+                    &draft,
+                    theme::regular(13.0),
+                    preview_color,
+                    (badge_right - x).max(0.0),
+                    1,
+                )
+            } else if let Some(last) = &chat.last {
+                let mut prefix = String::new();
+                if last.from_me {
+                    let tick_rect =
+                        Rect::from_center_size(pos2(x + 8.0, line_y + 8.0), Vec2::splat(16.0));
+                    widgets::ticks(
+                        ui,
+                        &palette,
+                        tick_rect,
+                        super::conversation::display_delivery(
+                            last.status,
+                            last.from_me,
+                            chat.kind,
+                            app.account_receipts_off,
+                        ),
+                    );
+                    x += 20.0;
+                } else if chat.is_group() {
+                    let sender = app.display_name_or(&last.sender, last.sender_name.as_deref());
+                    let first = app.short_name(&last.sender, &sender);
+                    prefix = format!("{first}: ");
+                    let sender = widgets::line(
+                        ui,
+                        &prefix,
+                        theme::regular(13.0),
+                        preview_color,
+                        (badge_right - x) * 0.5,
+                        1,
+                    );
+                    let width = sender.size().x;
+                    sender.paint(ui, pos2(x, line_y), preview_color);
+                    x += width;
+                }
+                let words = widgets::line(
+                    ui,
+                    &crate::markup::plain(
+                        &app.resolve_mention_tokens(&last.summary_in(app.locale)),
+                        &[],
+                    ),
+                    theme::regular(13.0),
+                    preview_color,
+                    (badge_right - x).max(0.0),
+                    1,
                 );
-                full_preview = Some((area, prefix, last.full_in(app.locale).into_owned()));
-            }
-            words
-        } else {
-            widgets::line(ui, "", theme::regular(13.0), preview_color, 1.0, 1)
-        };
-        preview.paint(ui, pos2(x, line_y), preview_color);
+                // The row shows one line: offer the whole message when that line
+                // was cut short or the message has more lines than it.
+                if words.galley.elided || last.full.trim_end() != last.summary {
+                    let area = Rect::from_min_max(
+                        pos2(left, line_y - 4.0),
+                        pos2(badge_right, line_y + words.size().y.max(16.0) + 4.0),
+                    );
+                    full_preview = Some((area, prefix, last.full_in(app.locale).into_owned()));
+                }
+                words
+            } else {
+                widgets::line(ui, "", theme::regular(13.0), preview_color, 1.0, 1)
+            };
+            preview.paint(ui, pos2(x, line_y), preview_color);
+        }
     }
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     if let Some((area, prefix, full)) = full_preview {
@@ -2062,15 +2145,19 @@ fn compact_row(app: &mut App, ui: &mut egui::Ui, chat: &Chat) -> egui::Response 
             );
         }
         let avatar_rect = Rect::from_center_size(rect.center(), Vec2::splat(COMPACT_AVATAR));
-        let picture = app.avatar(&chat.id);
-        widgets::paint_avatar(
-            ui,
-            &palette,
-            avatar_rect,
-            &title,
-            &chat.id,
-            picture.as_deref(),
-        );
+        if super::veil::covered(app.settings.privacy_blur, &response) {
+            super::veil::disc(ui, &palette, avatar_rect);
+        } else {
+            let picture = app.avatar(&chat.id);
+            widgets::paint_avatar(
+                ui,
+                &palette,
+                avatar_rect,
+                &title,
+                &chat.id,
+                picture.as_deref(),
+            );
+        }
         if chat.disappearing_timer().is_some() {
             widgets::paint_disappearing_badge(ui, &palette, avatar_rect);
         }
@@ -2523,6 +2610,94 @@ mod tests {
                 rect.width()
             );
         }
+    }
+
+    /// Every string one frame painted.
+    fn painted_text(shapes: &[egui::epaint::ClippedShape]) -> String {
+        fn texts(shape: &egui::Shape, out: &mut String) {
+            match shape {
+                egui::Shape::Text(text) => {
+                    out.push_str(text.galley.text());
+                    out.push('\n');
+                }
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| texts(shape, out)),
+                _ => {}
+            }
+        }
+        let mut out = String::new();
+        for clipped in shapes {
+            texts(&clipped.shape, &mut out);
+        }
+        out
+    }
+
+    #[test]
+    fn the_privacy_blur_keeps_a_rows_text_off_the_screen_until_hovered() {
+        let directory = tempfile::tempdir().unwrap();
+        let (mut app, _) = App::headless(
+            AppDirs::under(directory.path()),
+            Settings {
+                privacy_blur: true,
+                ..Settings::default()
+            },
+        );
+        let mut chat = Chat::new("ada@s.whatsapp.net".into(), "Ada Lovelace".into());
+        chat.last = Some(crate::model::LastMessage {
+            from_me: false,
+            sender: "ada@s.whatsapp.net".into(),
+            sender_name: None,
+            summary: "the launch code".into(),
+            full: "the launch code".into(),
+            labelled: false,
+            status: crate::model::Delivery::None,
+        });
+        let ctx = egui::Context::default();
+        app.attach(&ctx);
+        let frame = |app: &mut App, events| {
+            let mut response = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(400.0, 300.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| response = Some(row(app, ui, &chat)),
+            );
+            output.textures_delta.clear();
+            (response.unwrap(), painted_text(&output.shapes))
+        };
+        let shows = |text: &str| text.contains("Ada Lovelace") && text.contains("the launch code");
+        let hides =
+            |text: &str| !text.contains("Ada Lovelace") && !text.contains("the launch code");
+
+        // Nothing under the pointer: neither the name nor the preview is
+        // laid out, so no cover can leave them showing through.
+        let (response, text) = frame(&mut app, vec![]);
+        assert!(hides(&text), "a covered row drew {text:?}");
+
+        // Hover applies from the frame after the pointer moves.
+        let over = response.rect.center();
+        frame(&mut app, vec![egui::Event::PointerMoved(over)]);
+        let (_, text) = frame(&mut app, vec![]);
+        assert!(shows(&text), "a hovered row drew {text:?}");
+
+        frame(&mut app, vec![egui::Event::PointerGone]);
+        let (_, text) = frame(&mut app, vec![]);
+        assert!(hides(&text), "a row the pointer left drew {text:?}");
+
+        // Keyboard focus reveals it too.
+        let (response, _) = frame(&mut app, vec![]);
+        ctx.memory_mut(|memory| memory.request_focus(response.id));
+        frame(&mut app, vec![]);
+        let (_, text) = frame(&mut app, vec![]);
+        assert!(shows(&text), "a focused row drew {text:?}");
+
+        // With the setting off the row is untouched.
+        ctx.memory_mut(|memory| memory.surrender_focus(response.id));
+        app.settings.privacy_blur = false;
+        frame(&mut app, vec![egui::Event::PointerGone]);
+        let (_, text) = frame(&mut app, vec![]);
+        assert!(shows(&text), "with the blur off a row drew {text:?}");
     }
 
     fn click_clear_chat_in_the_list_menu(app: &mut App, chat: &Chat) {

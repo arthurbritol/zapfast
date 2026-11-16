@@ -453,6 +453,10 @@ pub struct Settings {
     pub send_read_receipts: bool,
     /// Send typing state while composing.
     pub send_typing: bool,
+    /// Cover names, messages and pictures until the pointer (or keyboard
+    /// focus) is on them, for reading with people nearby. Window-wide, not
+    /// per account.
+    pub privacy_blur: bool,
     /// Download attachments when they enter view instead of on click.
     #[serde(alias = "auto_download_images")]
     pub auto_download: bool,
@@ -569,6 +573,7 @@ impl Default for Settings {
             enter_sends: true,
             send_read_receipts: true,
             send_typing: true,
+            privacy_blur: false,
             auto_download: true,
             show_wallpaper: true,
             wallpaper_color: WallpaperColor::Theme,
@@ -1013,6 +1018,18 @@ mod tests {
             serde_json::from_str(r#"{"message_sound":"chime","mention_sound":"ripple"}"#).unwrap();
         assert_eq!(settings.message_sound, NotificationSound::Receive);
         assert_eq!(settings.mention_sound, NotificationSound::Alert);
+    }
+
+    #[test]
+    fn the_privacy_blur_is_off_unless_saved() {
+        assert!(!Settings::default().privacy_blur);
+        let old: Settings = serde_json::from_str(r#"{"zoom":1.0}"#).unwrap();
+        assert!(!old.privacy_blur);
+        let on: Settings = serde_json::from_str(r#"{"privacy_blur":true}"#).unwrap();
+        assert!(on.privacy_blur);
+        let text = serde_json::to_string(&on).unwrap();
+        let back: Settings = serde_json::from_str(&text).unwrap();
+        assert!(back.privacy_blur);
     }
 
     #[test]
