@@ -4542,14 +4542,18 @@ fn typing_bubble(ui: &mut egui::Ui, view: &View<'_>, typers: &[(String, String, 
                             palette.chat,
                         );
                     }
-                    widgets::paint_avatar(
-                        ui,
-                        &palette,
-                        avatar,
-                        name.trim_start_matches('~'),
-                        id,
-                        view.avatars.get(id).and_then(|picture| picture.as_deref()),
-                    );
+                    if view.privacy_blur {
+                        super::veil::disc(ui, &palette, avatar);
+                    } else {
+                        widgets::paint_avatar(
+                            ui,
+                            &palette,
+                            avatar,
+                            name.trim_start_matches('~'),
+                            id,
+                            view.avatars.get(id).and_then(|picture| picture.as_deref()),
+                        );
+                    }
                 }
             }
             ui.add_space(2.0);
