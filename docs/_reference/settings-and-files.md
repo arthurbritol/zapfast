@@ -217,6 +217,11 @@ name or description, in the interface language or in English.
   as on the phone. Group receipts and voice-message played receipts are
   unaffected.
 - **Show when you are typing**: send typing and recording state.
+- **Blur chats until hovered**: for reading with people nearby. Names,
+  messages and pictures stay covered until the pointer, or keyboard focus, is
+  on them. This is an opaque cover, not a true blur, and the covered text is
+  not drawn at all. It applies to the whole window, every linked number, and is
+  off by default.
 - **Last seen**, **Online**, **Profile photo**, **About**, **Groups**, **Read
   receipts**, **Calls**: your WhatsApp account privacy, stored on WhatsApp's
   servers and shared with your phone. They can be changed while connected.
