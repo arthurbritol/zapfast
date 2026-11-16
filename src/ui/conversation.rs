@@ -2531,6 +2531,24 @@ fn reply_strip(app: &mut App, ui: &mut egui::Ui, quoted: &Message) {
             });
         });
     });
+    // Over the finished strip, so whom and what the reply quotes show only
+    // while the pointer or focus is on it.
+    if app.settings.privacy_blur {
+        let strip = strip.response.rect;
+        if ui.is_rect_visible(strip)
+            && !super::veil::pointer_over(ui, strip)
+            && !super::veil::focus_within(ui, strip)
+        {
+            let words = Rect::from_min_max(
+                pos2(strip.left() + 14.0, strip.top() + 6.0),
+                pos2(
+                    (strip.right() - 40.0).max(strip.left() + 14.0),
+                    strip.bottom() - 6.0,
+                ),
+            );
+            super::veil::cover(ui, &palette, words, 6.0);
+        }
+    }
     ui.ctx()
         .data_mut(|data| data.insert_temp(reply_strip_id(), strip.response.rect));
     strip_gap(ui);
@@ -6922,6 +6940,10 @@ fn reactions(ui: &mut egui::Ui, view: &View<'_>, message: &Message, actions: &mu
             egui::StrokeKind::Inside,
         );
         line.paint(ui, rect.center() - line.size() / 2.0, palette.text);
+        // The emoji and count are covered until the chip is pointed at.
+        if super::veil::covered(view.privacy_blur, &response) {
+            super::veil::cover(ui, &palette, rect, rect.height() / 2.0);
+        }
     }
     let name = |reaction: &crate::model::Reaction| {
         if reaction.from_me {
